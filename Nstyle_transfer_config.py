@@ -1,5 +1,5 @@
 import os
-
+   
 # define the content layer from which feature map will be extracted
 contentLayers = ["block4_conv2"]
 
