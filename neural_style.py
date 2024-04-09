@@ -7,7 +7,7 @@ import tensorflow as tf
 import numpy as np
 
 
-class NeuralStyle(Model):
+class NeuralStyle(Model):   
     def __init__(self, styleLayers, contentLayers):
         # call the parent constructor
         super(NeuralStyle, self).__init__()
