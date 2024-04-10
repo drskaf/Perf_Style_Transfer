@@ -50,31 +50,14 @@ def show_n(images, titles=('',)):
     plt.title(titles[i] if len(titles) > i else '')
   plt.show()
 
-# Load content and style images
-#(images, indices) = utils.load_perf_images('/Users/ebrahamalskaf/Documents/test', 224)
-#for image, index in zip(images, indices):
- #   dir = f"{index}"
-  #  path = os.path.join('Image_Paths', dir)
-   # os.makedirs(path, exist_ok=True)
-
-    #for m in range(len(image[0, 0, :])):
-     #   plt.imshow(image[...,m], cmap='gray')
-      #  plt.savefig(f"{m}.png")
-       # shutil.move(f"{m}.png", f"/Users/ebrahamalskaf/Documents/**STYLE_TRANSFER**/Fast_Style_Transfer/Image_Paths/{index}")
-
 imgPaths = glob.glob(f"/Users/ebrahamalskaf/Documents/**STYLE_TRANSFER**//Fast_Style_Transfer/CONTENT/*.png")
-    #imgRange = range(len(glob.glob(f"/Users/ebrahamalskaf/Documents/**STYLE_TRANSFER**/Fast_Style_Transfer/Image_Paths/{index}/*.png")))
-
+   
 for imgPath in imgPaths:
     # Style transfer pipeline
     im_name = os.path.basename(imgPath)
     print(im_name)
     content_image_path = imgPath
     style_image_path = 'style.png'
-    #style_dic = pydicom.dcmread(style_image_path)
-    #style_dcm = style_dic.pixel_array
-    #plt.imshow(style_dcm, cmap='gray')
-    #plt.savefig("style.png")
     output_image_size = 256
     content_image_size = (output_image_size, output_image_size)
 
