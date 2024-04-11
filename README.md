@@ -8,4 +8,6 @@ This repositry contains 3 models training script for style transfer of legacy st
 5. 1. PS.py: Perceptual Similarity score, the higher the score the more similar the stylised image to original map.
    2. FID.py: Frechet Inception Distance, the lower the score the more similar extracted features.
    3. IS.py: Inception Score, normally 1 -1000, higher is better, unless falling outside the range, meaning more diverse and less authentic.
-   4. MSE.py: Mean Squared Error difference from content images, the lower the more preserved contents. 
+   4. MSE.py: Mean Squared Error difference from content images, the lower the more preserved contents.
+   5. SSIM.py: Structural Similarity Index, the higher value the more preservation to structural information. 
+
