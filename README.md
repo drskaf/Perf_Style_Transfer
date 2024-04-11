@@ -5,4 +5,5 @@ This repositry contains 3 models training script for style transfer of legacy st
 3. MUNIT: multimodal unsupervised image-to-image translation will use encoder and decoder to generate stylised images, trained on the whole dataset.
 
 4. ## Performance metrics
-5. 1. PS.py: perceptual similarity score, the higher the score the more similar the stylised image to original map. 
+5. 1. PS.py: Perceptual Similarity score, the higher the score the more similar the stylised image to original map.
+   2. FID.py: Frechet Inception Distance, the lower the score the more similar extracted features. 
