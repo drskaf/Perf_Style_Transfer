@@ -10,5 +10,6 @@ This repositry contains 3 models training script for style transfer of legacy st
    3. is.py: Inception Score, normally 1 -1000, higher is better, unless falling outside the range, meaning more diverse and less authentic.
       mse.py: Mean Squared Error difference from content images, the lower the more preserved contents.
    5. ssim.py: Structural Similarity Index, the higher value the more preservation to structural information.
-   6. ssm.py: Style Similarity Score, the higher the score the more similarity with style reference. 
+   6. ssm.py: Style Similarity Score, the higher the score the more similarity with style reference.
+   7. psnr.py: Peak Signal-to-Noise Ratio, the higher the value the better reconstruction quality of the stylised image. 
 
