@@ -175,29 +175,33 @@ def train(generator, discriminator, gen_optimizer, dis_optimizer, epochs, loss_f
             tf.summary.scalar('Avg Generator Loss', avg_loss_gen.result(), step=epoch)
             tf.summary.scalar('Avg Discriminator Loss', avg_loss_dis.result(), step=epoch)
 
-        # Log images at the end of each epoch
-        with train_writer.as_default():
-            def normalize_for_tensorboard(image):
-                image = (image + 1.0) / 2.0
-                image = tf.clip_by_value(image, 0.0, 1.0)
-                image = image * 255.0
-                return tf.cast(image, tf.uint8)
+        # Log images at the end of each 10 epoch
+        if (epoch + 1) % (epochs * 0.1) == 0:
+            with train_writer.as_default():
+                def normalize_for_tensorboard(image):
+                    image = (image + 1.0) / 2.0
+                    image = tf.clip_by_value(image, 0.0, 1.0)
+                    image = image * 255.0
+                    return tf.cast(image, tf.uint8)
 
-            # Pick random images from the dataset for logging
-            sample_images_a = next(iter(trainA.batch(1)))[0]
-            sample_images_b = next(iter(trainB.batch(1)))[0]
-            z_sample_a, _, _ = generator.encode(sample_images_a)
-            reconstructed_a = generator.decode(z_sample_a)
+                # Pick random images from the dataset for logging
+                sample_images_a = next(iter(trainA.batch(1)))[0]
+                sample_images_b = next(iter(trainB.batch(1)))[0]
+                z_sample_a, _, _ = generator.encode(sample_images_a)
+                reconstructed_a = generator.decode(z_sample_a)
 
-            tf.summary.image(f"Reconstructed A/epoch_{epoch + 1}", normalize_for_tensorboard(reconstructed_a),
-                             max_outputs=1, step=epoch)
-            tf.summary.image(f"Original A/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_a), max_outputs=1,
-                             step=epoch)
-            tf.summary.image(f"Original B/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_b), max_outputs=1,
-                             step=epoch)
+                tf.summary.image(f"Reconstructed A/epoch_{epoch + 1}", normalize_for_tensorboard(reconstructed_a),
+                                 max_outputs=1, step=epoch)
+                tf.summary.image(f"Original A/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_a),
+                                 max_outputs=1,
+                                 step=epoch)
+                tf.summary.image(f"Original B/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_b),
+                                 max_outputs=1,
+                                 step=epoch)
 
-            print(f"Logged images at Epoch {epoch + 1}")
-            train_writer.flush()
+                print(f"Logged images at Epoch {epoch + 1}")
+                train_writer.flush()
+
 
         # Save checkpoint
         #generator.save(os.path.join(checkpoint_dir, 'generator', f'epoch_{epoch + 1}'),
