@@ -154,27 +154,6 @@ def train_step(generator, discriminator, images_a, images_b, gen_optimizer, dis_
     gen_optimizer.apply_gradients(zip(gradients_gen, generator.trainable_variables))
     dis_optimizer.apply_gradients(zip(gradients_dis, discriminator.trainable_variables))
 
-    # log training logs and images to tensorboard
-    if step % 10 == 0:
-        with train_writer.as_default():
-            tf.summary.scalar(f'Generator Loss', loss_gen_total, step=step)
-            tf.summary.scalar(f'Discriminator Loss', loss_dis_total, step=step)
-
-            def normalize_for_tensorboard(image):
-                image = (image + 1.0) / 2.0
-                image = tf.clip_by_value(image, 0.0, 1.0)
-                image = image * 255.0
-                return tf.cast(image, tf.uint8)
-
-            tf.summary.image(f"Reconstructed A/epoch_{epoch + 1}_step_{step + 1}", normalize_for_tensorboard(x_ab),
-                             step=step)
-            tf.summary.image(f"Original A/epoch_{epoch + 1}_step_{step + 1}", normalize_for_tensorboard(images_a),
-                             step=step)
-            tf.summary.image(f"Original B/epoch_{epoch + 1}_step_{step + 1}", normalize_for_tensorboard(images_b),
-                             step=step)
-            print(f"Logged images at Epoch {epoch + 1}, Step {step +1}")
-            train_writer.flush()
-
     tf.print("Step:", step + 1, "Gen Loss:", loss_gen_total, "Disc Loss:", loss_dis_total)
 
     return loss_gen_total, loss_dis_total
@@ -182,10 +161,43 @@ def train_step(generator, discriminator, images_a, images_b, gen_optimizer, dis_
 # Training function
 def train(generator, discriminator, gen_optimizer, dis_optimizer, epochs, loss_fn, checkpoint_dir):
     for epoch in range(epochs):
+        avg_loss_gen = tf.keras.metrics.Mean()
+        avg_loss_dis = tf.keras.metrics.Mean()
         for step, (images_a, images_b) in enumerate(train_dataset.take(iteration)):
             loss_gen, loss_dis = train_step(generator, discriminator, images_a, images_b, gen_optimizer, dis_optimizer, loss_fn, step, epoch)
+            avg_loss_gen.update_state(loss_gen)
+            avg_loss_dis.update_state(loss_dis)
 
-        print(f'Epoch {epoch + 1}, Generator Loss: {loss_gen.numpy()}, Discriminator Loss: {loss_dis.numpy()}')
+        print(f'Epoch {epoch + 1}, Avg Generator Loss: {avg_loss_gen.result().numpy()}, Avg Discriminator Loss: {avg_loss_dis.result().numpy()}')
+
+        # Log avaeraged losses
+        with train_writer.as_default():
+            tf.summary.scalar('Avg Generator Loss', avg_loss_gen.result(), step=epoch)
+            tf.summary.scalar('Avg Discriminator Loss', avg_loss_dis.result(), step=epoch)
+
+        # Log images at the end of each epoch
+        with train_writer.as_default():
+            def normalize_for_tensorboard(image):
+                image = (image + 1.0) / 2.0
+                image = tf.clip_by_value(image, 0.0, 1.0)
+                image = image * 255.0
+                return tf.cast(image, tf.uint8)
+
+            # Pick random images from the dataset for logging
+            sample_images_a = next(iter(trainA.batch(1)))[0]
+            sample_images_b = next(iter(trainB.batch(1)))[0]
+            z_sample_a, _, _ = generator.encode(sample_images_a)
+            reconstructed_a = generator.decode(z_sample_a)
+
+            tf.summary.image(f"Reconstructed A/epoch_{epoch + 1}", normalize_for_tensorboard(reconstructed_a),
+                             max_outputs=1, step=epoch)
+            tf.summary.image(f"Original A/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_a), max_outputs=1,
+                             step=epoch)
+            tf.summary.image(f"Original B/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_b), max_outputs=1,
+                             step=epoch)
+
+            print(f"Logged images at Epoch {epoch + 1}")
+            train_writer.flush()
 
         # Save checkpoint
         #generator.save(os.path.join(checkpoint_dir, 'generator', f'epoch_{epoch + 1}'),
@@ -193,21 +205,10 @@ def train(generator, discriminator, gen_optimizer, dis_optimizer, epochs, loss_f
         #discriminator.save(os.path.join(checkpoint_dir, 'discriminator', f'epoch_{epoch + 1}'),
          #                                  save_format='tf')
 
-# Clear GPU memory
-def clear_memory():
-    tf.keras.backend.clear_session()
-    tf.compat.v1.reset_default_graph()
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-
 # Main script
 def main():
     epochs = 100
     checkpoint_dir = './checkpoint'
-
-    # Clear GPU memory before starting training
-    #clear_memory()
 
     # Create models
     generator = VAEGen(input_dim=256, z_dim=8)
