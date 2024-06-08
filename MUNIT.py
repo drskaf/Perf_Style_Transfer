@@ -2,7 +2,7 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 import numpy as np
 import datetime
-from utils import *    
+from utils import *
 from ops import *
 from glob import glob
 import time
@@ -125,24 +125,35 @@ log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 train_writer = tf.summary.create_file_writer(log_dir + "/images")
 
 # Training step function
+# Helper function for gradients
+def gradient_penalty(discriminator, real_images, fake_images):
+    """Calculates the gradient penalty."""
+    alpha = tf.random.normal([real_images.shape[0], 1, 1, 1], 0.0, 1.0)
+    interpolated = real_images + alpha * (fake_images - real_images)
+    with tf.GradientTape() as tape:
+        tape.watch(interpolated)
+        pred = discriminator(interpolated)
+    grads = tape.gradient(pred, interpolated)
+    norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
+    penalty = tf.reduce_mean((norm - 1.0) ** 2)
+    return penalty
+
+# Training functions
+accumulation_steps = 10
 @tf.function
 def train_step(generator, discriminator, images_a, images_b, gen_optimizer, dis_optimizer, loss_fn, step, epoch):
     with tf.GradientTape(persistent=True) as tape:
         z_a, mean_a, log_var_a = generator.encode(images_a)
-        z_b, mean_b, log_var_b = generator.encode(images_b)
         x_ab = generator.decode(z_a)
-        x_ba = generator.decode(z_b)
 
         loss_gen_ab = loss_fn(images_b, x_ab)
-        loss_gen_ba = loss_fn(images_a, x_ba)
-        loss_gen_total = loss_gen_ab + loss_gen_ba
+        loss_gen_total = loss_gen_ab
 
-        real_a, real_b = discriminator(images_a), discriminator(images_b)
-        fake_a, fake_b = discriminator(x_ba), discriminator(x_ab)
+        real_b = discriminator(images_b)
+        fake_b = discriminator(x_ab)
 
-        loss_dis_a = sum([tf.reduce_mean(tf.square(real_a[i] - 1.0)) + tf.reduce_mean(tf.square(fake_a[i])) for i in range(len(real_a))])
         loss_dis_b = sum([tf.reduce_mean(tf.square(real_b[i] - 1.0)) + tf.reduce_mean(tf.square(fake_b[i])) for i in range(len(real_b))])
-        loss_dis_total = loss_dis_a + loss_dis_b
+        loss_dis_total = loss_dis_b 
 
     gradients_gen = tape.gradient(loss_gen_total, generator.trainable_variables)
     gradients_dis = tape.gradient(loss_dis_total, discriminator.trainable_variables)
@@ -151,8 +162,14 @@ def train_step(generator, discriminator, images_a, images_b, gen_optimizer, dis_
     gradients_gen = [tf.clip_by_value(grad, -1.0, 1.0) for grad in gradients_gen]
     gradients_dis = [tf.clip_by_value(grad, -1.0, 1.0) for grad in gradients_dis]
 
-    gen_optimizer.apply_gradients(zip(gradients_gen, generator.trainable_variables))
-    dis_optimizer.apply_gradients(zip(gradients_dis, discriminator.trainable_variables))
+    # Accumulate gradients
+    if step % accumulation_steps == 0:
+        for grad in gradients_gen:
+            tf.debugging.check_numerics(grad, "Generator gradient NaN")
+        for grad in gradients_dis:
+            tf.debugging.check_numerics(grad, "Discriminator gradient NaN")
+        gen_optimizer.apply_gradients(zip(gradients_gen, generator.trainable_variables))
+        dis_optimizer.apply_gradients(zip(gradients_dis, discriminator.trainable_variables))
 
     tf.print("Step:", step + 1, "Gen Loss:", loss_gen_total, "Disc Loss:", loss_dis_total)
 
@@ -160,6 +177,15 @@ def train_step(generator, discriminator, images_a, images_b, gen_optimizer, dis_
 
 # Training function
 def train(generator, discriminator, gen_optimizer, dis_optimizer, epochs, loss_fn, checkpoint_dir):
+    patience = 5
+    gen_lr_reduction_factor = 0.5
+    dis_lr_reduction_factor = 0.5
+
+    best_gen_loss = float('inf')
+    best_dis_loss = float('inf')
+    gen_patience_counter = 0
+    dis_patience_counter = 0
+
     for epoch in range(epochs):
         avg_loss_gen = tf.keras.metrics.Mean()
         avg_loss_dis = tf.keras.metrics.Mean()
@@ -168,46 +194,71 @@ def train(generator, discriminator, gen_optimizer, dis_optimizer, epochs, loss_f
             avg_loss_gen.update_state(loss_gen)
             avg_loss_dis.update_state(loss_dis)
 
-        print(f'Epoch {epoch + 1}, Avg Generator Loss: {avg_loss_gen.result().numpy()}, Avg Discriminator Loss: {avg_loss_dis.result().numpy()}')
+        avg_loss_gen = avg_loss_gen.result().numpy()
+        avg_loss_dis = avg_loss_dis.result().numpy()
+        print(f'Epoch {epoch + 1}, Avg Generator Loss: {avg_loss_gen}, Avg Discriminator Loss: {avg_loss_dis}')
 
         # Log avaeraged losses
         with train_writer.as_default():
-            tf.summary.scalar('Avg Generator Loss', avg_loss_gen.result(), step=epoch)
-            tf.summary.scalar('Avg Discriminator Loss', avg_loss_dis.result(), step=epoch)
+            tf.summary.scalar('Avg Generator Loss', avg_loss_gen, step=epoch)
+            tf.summary.scalar('Avg Discriminator Loss', avg_loss_dis, step=epoch)
 
-        # Log images at the end of each 10 epoch
-        if (epoch + 1) % (epochs * 0.1) == 0:
-            with train_writer.as_default():
-                def normalize_for_tensorboard(image):
-                    image = (image + 1.0) / 2.0
-                    image = tf.clip_by_value(image, 0.0, 1.0)
-                    image = image * 255.0
-                    return tf.cast(image, tf.uint8)
+        # Adjust learning rates if needed
+        if avg_loss_gen < best_gen_loss:
+            best_gen_loss = avg_loss_gen
+            gen_patience_counter = 0
+        else:
+            gen_patience_counter += 1
+            if gen_patience_counter >= patience:
+                old_lr = gen_optimizer.learning_rate.numpy()
+                new_lr = old_lr * gen_lr_reduction_factor
+                gen_optimizer.learning_rate.assign(new_lr)
+                print(f'Reduced Generator learning rate to {new_lr}')
+                gen_patience_counter = 0
 
-                # Pick random images from the dataset for logging
-                sample_images_a = next(iter(trainA.batch(1)))[0]
-                sample_images_b = next(iter(trainB.batch(1)))[0]
-                z_sample_a, _, _ = generator.encode(sample_images_a)
-                reconstructed_a = generator.decode(z_sample_a)
+        if avg_loss_dis < best_dis_loss:
+            best_dis_loss = avg_loss_dis
+            dis_patience_counter = 0
+        else:
+            dis_patience_counter += 1
+            if dis_patience_counter >= patience:
+                old_lr = dis_optimizer.learning_rate.numpy()
+                new_lr = old_lr * dis_lr_reduction_factor
+                dis_optimizer.learning_rate.assign(new_lr)
+                print(f'Reduced Discriminator learning rate to {new_lr}')
+                dis_patience_counter = 0
 
-                tf.summary.image(f"Reconstructed A/epoch_{epoch + 1}", normalize_for_tensorboard(reconstructed_a),
-                                 max_outputs=1, step=epoch)
-                tf.summary.image(f"Original A/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_a),
-                                 max_outputs=1,
-                                 step=epoch)
-                tf.summary.image(f"Original B/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_b),
-                                 max_outputs=1,
-                                 step=epoch)
+        # Log images at the end of each epoch
+        with train_writer.as_default():
+            def normalize_for_tensorboard(image):
+                image = (image + 1.0) / 2.0
+                image = tf.clip_by_value(image, 0.0, 1.0)
+                image = image * 255.0
+                return tf.cast(image, tf.uint8)
 
-                print(f"Logged images at Epoch {epoch + 1}")
-                train_writer.flush()
+            # Pick random images from the dataset for logging
+            sample_images_a = next(iter(trainA.batch(1)))[0]
+            sample_images_b = next(iter(trainB.batch(1)))[0]
+            z_sample_a, _, _ = generator.encode(sample_images_a)
+            reconstructed_a = generator.decode(z_sample_a)
 
+            tf.summary.image(f"Reconstructed A/epoch_{epoch + 1}", normalize_for_tensorboard(reconstructed_a), max_outputs=1, step=epoch)
+            tf.summary.image(f"Original A/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_a), max_outputs=1, step=epoch)
+            tf.summary.image(f"Original B/epoch_{epoch + 1}", normalize_for_tensorboard(sample_images_b), max_outputs=1, step=epoch)
+
+            print(f"Logged images at Epoch {epoch + 1}")
+            train_writer.flush()
 
         # Save checkpoint
-        #generator.save(os.path.join(checkpoint_dir, 'generator', f'epoch_{epoch + 1}'),
-         #                              save_format='tf')
-        #discriminator.save(os.path.join(checkpoint_dir, 'discriminator', f'epoch_{epoch + 1}'),
-         #                                  save_format='tf')
+        if (epoch + 1) % accumulation_steps == 0:
+            generator.save(os.path.join(checkpoint_dir, f'generator_epoch_{epoch + 1}'), save_format='tf')
+            discriminator.save(os.path.join(checkpoint_dir, f'discriminator_epoch_{epoch + 1}'), save_format='tf')
+
+    # Final cleanup and exit
+    print("Training complete. Performing final cleanup...")
+    train_writer.close()
+    print("Cleanup done. Exiting now.")
+    sys.exit(0)
 
 # Main script
 def main():
@@ -217,6 +268,11 @@ def main():
     # Create models
     generator = VAEGen(input_dim=256, z_dim=8)
     discriminator = MsImageDis(input_dim=256, num_scales=3, num_filters=64)
+
+    # Build models with dummy data to ensure input shape is known
+    dummy_input = tf.random.normal([1, 256, 256, 3])
+    generator(dummy_input)
+    discriminator(dummy_input)
 
     # Optimizers and loss function
     gen_optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001, beta_1=0.5, beta_2=0.999)
